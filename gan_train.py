@@ -19,7 +19,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 
 import matplotlib.pyplot as plt
-%matplotlib
+#%matplotlib
 
 
 # custom weights initialization called on netG and netD
@@ -34,7 +34,7 @@ def update_learning_rate(optimizer, epoch, init_lr, decay_rate, lr_decay_epochs)
     lr = init_lr * (decay_rate**(epoch // lr_decay_epochs))
     
     if epoch % lr_decay_epochs == 0:
-        print 'LR set to {}'.format(lr)
+        print('LR set to {}'.format(lr))
     
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
@@ -113,13 +113,14 @@ class DataDistribution(object):
         return np.reshape(samples, (-1, 1))
 
 
-def GeneratorDistribution(object):
+class GeneratorDistribution(object):
     def __init__(self, range):
         self.range = range
 
     def sample(self, N):
         samples = np.linspace(-self.range, self.range, N) + \
             np.random.random(N) * 0.01
+        return samples
 
 
 class Generator(torch.nn.Module):
@@ -208,7 +209,7 @@ for epoch in range(epochs):
     D_x = output.data.mean()
     
     # train with fake
-    z = torch.FloatTensor(gen_dist.sample(N))
+    z = torch.FloatTensor(gen_dist.sample(N))[...,None]  # (N_sample, N_channel)
     if use_cuda:
         z = z.cuda()
     zv = Variable(z)
@@ -242,8 +243,8 @@ for epoch in range(epochs):
                                       decay_rate=0.95,
                                       lr_decay_epochs=150)
     
-    print '[%d/%d] Loss_D: %.4f Loss_G %.4f D(x): %.4f D(G(z)): %.4f / %.4f' \
-        % (epoch, epochs, errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2)
+    print('[%d/%d] Loss_D: %.4f Loss_G %.4f D(x): %.4f D(G(z)): %.4f / %.4f' \
+        % (epoch, epochs, errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2))
     
     if epoch % plot_every_epochs == 0:
         # Plot distribution
