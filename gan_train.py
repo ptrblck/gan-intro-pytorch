@@ -207,9 +207,9 @@ def save_animation(anim_frames, anim_path, sample_range):
 
 
 
-N = 8
-D_in = 1
-H = 4
+N = 8  # batch size
+D_in = 1  # input size of D
+H = 4  # numbr of  hidden neurons
 D_out = 1
 learning_rate = 0.005
 epochs = 10000
@@ -292,12 +292,12 @@ for epoch in range(epochs):
                                       lr_decay_epochs=150)
 
     ############################
-    # (2) Update G network: maximize log(D(G(z)))
+    # (2) Update G network: maximize log(D(G(z))): guide D make wrong prediction: G(z) --> real_label(1)
     ###########################
     netG.zero_grad()
     labelv = Variable(label.fill_(real_label))
     output = netD(fake)  # D(G(z))
-    errG = criterion(output, labelv)    
+    errG = criterion(output, labelv)
     errG.backward()
     D_G_z2 = output.data.mean()
     optimizerG.step()
