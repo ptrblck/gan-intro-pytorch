@@ -18,8 +18,11 @@ import torch
 from torch.autograd import Variable
 import torch.nn.functional as F
 
+import os
 import matplotlib.pyplot as plt
-%matplotlib
+from matplotlib import animation
+import datetime
+#%matplotlib
 
 
 # custom weights initialization called on netG and netD
@@ -34,7 +37,7 @@ def update_learning_rate(optimizer, epoch, init_lr, decay_rate, lr_decay_epochs)
     lr = init_lr * (decay_rate**(epoch // lr_decay_epochs))
     
     if epoch % lr_decay_epochs == 0:
-        print 'LR set to {}'.format(lr)
+        print('LR set to {}'.format(lr))
     
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
@@ -84,7 +87,7 @@ def samples(
     return db, pd, pg
 
 
-def plot_distributions(samps, sample_range, ax):
+def plot_distributions(samps, sample_range, ax, save_img_name):
     ax.clear()
     db, pd, pg = samps
     db_x = np.linspace(-sample_range, sample_range, len(db))
@@ -98,8 +101,9 @@ def plot_distributions(samps, sample_range, ax):
     plt.xlabel('Data values')
     plt.ylabel('Probability density')
     plt.legend()
-    plt.show()
-    plt.pause(0.05)
+    plt.savefig(save_img_name)
+    #plt.show()
+    #plt.pause(0.05)
 
 
 class DataDistribution(object):
@@ -113,13 +117,14 @@ class DataDistribution(object):
         return np.reshape(samples, (-1, 1))
 
 
-def GeneratorDistribution(object):
+class GeneratorDistribution(object):
     def __init__(self, range):
         self.range = range
 
     def sample(self, N):
         samples = np.linspace(-self.range, self.range, N) + \
             np.random.random(N) * 0.01
+        return samples
 
 
 class Generator(torch.nn.Module):
@@ -149,14 +154,74 @@ class Discriminator(torch.nn.Module):
         out = F.sigmoid(self.linear4(h2))
         return out
 
+def save_animation(anim_frames, anim_path, sample_range):
+    f, ax = plt.subplots(figsize=(6, 4))
+    f.suptitle('1D Generative Adversarial Network', fontsize=15)
+    plt.xlabel('Data values')
+    plt.ylabel('Probability density')
+    ax.set_xlim(-6, 6)
+    ax.set_ylim(0, 1.4)
+    line_db, = ax.plot([], [], label='decision boundary')
+    line_pd, = ax.plot([], [], label='real data')
+    line_pg, = ax.plot([], [], label='generated data')
+    frame_number = ax.text(
+        0.02,
+        0.95,
+        '',
+        horizontalalignment='left',
+        verticalalignment='top',
+        transform=ax.transAxes
+    )
+    ax.legend()
 
-N = 8
-D_in = 1
-H = 4
+    db, pd, _ = anim_frames[0]
+    db_x = np.linspace(-sample_range, sample_range, len(db))
+    p_x = np.linspace(-sample_range, sample_range, len(pd))
+
+    def init():
+        line_db.set_data([], [])
+        line_pd.set_data([], [])
+        line_pg.set_data([], [])
+        frame_number.set_text('')
+        return (line_db, line_pd, line_pg, frame_number)
+
+    def animate(i):
+        frame_number.set_text(
+            'Frame: {}/{}'.format(i, len(anim_frames))
+        )
+        db, pd, pg = anim_frames[i]
+        line_db.set_data(db_x, db)
+        line_pd.set_data(p_x, pd)
+        line_pg.set_data(p_x, pg)
+        return (line_db, line_pd, line_pg, frame_number)
+
+    anim = animation.FuncAnimation(
+        f,
+        animate,
+        init_func=init,
+        frames=len(anim_frames),
+        blit=True
+    )
+    anim.save(anim_path, fps=30, extra_args=['-vcodec', 'libx264'])
+
+
+
+
+N = 8  # batch size
+D_in = 1  # input size of D
+H = 4  # numbr of  hidden neurons
 D_out = 1
 learning_rate = 0.005
 epochs = 10000
 plot_every_epochs = 1000
+current_time = datetime.datetime.now().strftime("20%y%m%d_%H%M_%S")
+output_path = '/tmp/{}'.format(current_time)
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+anim_path = output_path
+
+
+anim_frames = []
 
 use_cuda = torch.cuda.is_available()
 
@@ -192,7 +257,7 @@ for epoch in range(epochs):
     ############################
     # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
     ###########################
-    # train with real
+    # train with real: maximize log(D(x))
     netD.zero_grad()
     real_cpu = torch.FloatTensor(data_dist.sample(N))
     if use_cuda:
@@ -202,19 +267,19 @@ for epoch in range(epochs):
     xv = Variable(x)
     labelv = Variable(label)
     
-    output = netD(xv)
+    output = netD(xv)  # D(x)
     errD_real = criterion(output, labelv)
     errD_real.backward()
     D_x = output.data.mean()
     
-    # train with fake
-    z = torch.FloatTensor(gen_dist.sample(N))
+    # train with fake: maximize log(1 - D(G(z)))
+    z = torch.FloatTensor(gen_dist.sample(N))[...,None]  # (N_sample, N_channel)
     if use_cuda:
         z = z.cuda()
     zv = Variable(z)
-    fake = netG(zv)
+    fake = netG(zv)   # G(z)
     labelv = Variable(label.fill_(fake_label))
-    output = netD(fake.detach())
+    output = netD(fake.detach())   # D(G(z))
     errD_fake = criterion(output, labelv)
     errD_fake.backward()
     D_G_z1 = output.data.mean()
@@ -227,12 +292,12 @@ for epoch in range(epochs):
                                       lr_decay_epochs=150)
 
     ############################
-    # (2) Update G network: maximize log(D(G(z)))
+    # (2) Update G network: maximize log(D(G(z))): guide D make wrong prediction: G(z) --> real_label(1)
     ###########################
     netG.zero_grad()
     labelv = Variable(label.fill_(real_label))
-    output = netD(fake)
-    errG = criterion(output, labelv)    
+    output = netD(fake)  # D(G(z))
+    errG = criterion(output, labelv)
     errG.backward()
     D_G_z2 = output.data.mean()
     optimizerG.step()
@@ -242,10 +307,13 @@ for epoch in range(epochs):
                                       decay_rate=0.95,
                                       lr_decay_epochs=150)
     
-    print '[%d/%d] Loss_D: %.4f Loss_G %.4f D(x): %.4f D(G(z)): %.4f / %.4f' \
-        % (epoch, epochs, errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2)
-    
+    print('[%d/%d] Loss_D: %.4f Loss_G %.4f D(x): %.4f D(G(z)): %.4f / %.4f' \
+        % (epoch, epochs, errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2))
+
     if epoch % plot_every_epochs == 0:
         # Plot distribution
         samps = samples([netD, netG], data_dist, gen_dist.range, N)
-        plot_distributions(samps, gen_dist.range, ax)
+        anim_frames.append(samps)
+        plot_distributions(samps, gen_dist.range, ax, save_img_name = output_path+'/{:06}'.format(epoch))
+
+# save_animation(anim_frames, anim_path, gen_dist.range)
